@@ -331,7 +331,7 @@ float InterleavedGradientNoise( float2 uv, float FrameId )
 #endif
 ```
 
-### 处理高光颜色
+### 处理 SpecularColor
 
 ```glsl
 GBuffer.SpecularColor = ComputeF0(Specular, BaseColor, Metallic);
@@ -348,6 +348,39 @@ float DielectricSpecularToF0(float Specular)
 ```
 
 非金属为 0.08f * Specular ，金属为 BaseColor。利用金属度非黑即白的特性，UE4在同一个材质中兼容了Metallic 和 Specular  两种工作流。
+
+### 处理 Roughness
+
+```glsl
+#if MATERIAL_NORMAL_CURVATURE_TO_ROUGHNESS
+	// Curvature-to-roughness uses derivatives of the WorldVertexNormal, which is incompatible with centroid interpolation because
+	// the samples are not uniformly distributed. Therefore we use WorldVertexNormal_Center which is guaranteed to be center interpolated.
+#if USE_WORLDVERTEXNORMAL_CENTER_INTERPOLATION
+	float GeometricAARoughness = NormalCurvatureToRoughness(MaterialParameters.WorldVertexNormal_Center);
+#else
+	float GeometricAARoughness = NormalCurvatureToRoughness(MaterialParameters.TangentToWorld[2].xyz);
+#endif
+	GBuffer.Roughness = max(GBuffer.Roughness, GeometricAARoughness);
+
+//Located in BasePassPixelShader.usf
+float NormalCurvatureToRoughness(float3 WorldNormal)
+{
+    float3 dNdx = ddx(WorldNormal);
+    float3 dNdy = ddy(WorldNormal);
+    float x = dot(dNdx, dNdx);
+    float y = dot(dNdy, dNdy);
+    float CurvatureApprox = pow(max(x, y), View.NormalCurvatureToRoughnessScaleBias.z);
+	return saturate(CurvatureApprox * View.NormalCurvatureToRoughnessScaleBias.x + View.NormalCurvatureToRoughnessScaleBias.y);
+}
+```
+
+使用相邻像素的法线方向计算粗糙度。取几何粗糙度、输入粗糙度的最大值。
+
+### 处理 DiffuseColor
+
+```glsl
+GBuffer.DiffuseColor = BaseColor - BaseColor * Metallic;
+```
 
 ### EnvBRDFApprox（Fully Rough）
 
@@ -452,7 +485,7 @@ uint GridIndex = 0;
 
 			#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
 				GridIndex = ComputeLightGridCellIndex((uint2)(MaterialParameters.SvPosition.xy * View.LightProbeSizeRatioAndInvSizeRatio.zw - ResolvedView.ViewRectMin.xy), MaterialParameters.SvPosition.w, EyeIndex);
-
+			//EyeIndex用于VR渲染，其他情况下为0
 				#if FORWARD_SHADING || TRANSLUCENCY_LIGHTING_SURFACE_FORWARDSHADING || MATERIAL_SHADINGMODEL_SINGLELAYERWATER
 					const float Dither = InterleavedGradientNoise(MaterialParameters.SvPosition.xy, View.StateFrameIndexMod8);
 					FDeferredLightingSplit ForwardDirectLighting = GetForwardDirectLightingSplit(GridIndex, MaterialParameters.AbsoluteWorldPosition, MaterialParameters.CameraVector, GBuffer, NearestResolvedDepthScreenUV, MaterialParameters.PrimitiveId, EyeIndex, Dither, DirectionalLightShadow);
@@ -469,68 +502,64 @@ uint GridIndex = 0;
 UE4会把场景中的灯光按照屏幕空间分成相应的grid，类似于cluster shading的方法，注意这里的grid只考虑点光源，聚光灯，以及reflection captures，UE4这一步是通过compute shader实现的，所以只在sm>5.0的平台上有。具体shader代码在LightGridInjection.usf，阅读代码之后我们可以发现 UE4的灯光空间grid的划分是按照指数增长的。也就是每个grid的z随着距离会增长。在真正计算光照时，我们可以用GridIndex来快速决定某点是否受到灯光影响。
 
 * 计算光照
-
 ```glsl
-float3 GetForwardDirectLightingForVertexLighting(uint GridIndex, float3 WorldPosition, float SceneDepth, float3 WorldNormal, uint EyeIndex)
+FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 WorldPosition, float3 CameraVector, FGBufferData GBufferData, float2 ScreenUV, uint PrimitiveId, uint EyeIndex, float Dither, inout float OutDirectionalLightShadow)
 {
-	float3 DirectLighting = 0;
-	// Using white for diffuse color, real diffuse color will be incorporated per-pixel
-	float3 DiffuseColor = 1.0f;
+	float4 DynamicShadowFactors = 1;
+    //Float4类型，保存了多张shadowmap，Located in ForwardLightingCommon.ush
+	DynamicShadowFactors = GetForwardDynamicShadowFactors(ScreenUV);
 
+	FDeferredLightingSplit DirectLighting;
+	DirectLighting.DiffuseLighting = 0;
+	DirectLighting.SpecularLighting = 0;
+	float SpecularScale = 1;
+	uint LightingChannelMask = GetPrimitiveData(PrimitiveId).LightingChannelMask;
+	
+    //获取灯光数据，EyeIndex用于VR渲染
 	const FDirectionalLightData DirectionalLightData = GetDirectionalLightData(EyeIndex);
+	FRectTexture RectTexture = InitRectTexture(ForwardLightData.DummyRectLightSourceTexture);
 
 	BRANCH
 	if (DirectionalLightData.HasDirectionalLight)
 	{
-		float3 N = WorldNormal;
-		float3 L = DirectionalLightData.DirectionalLightDirection;
-		float NoL = saturate(dot(N, L));
+		FDeferredLightData LightData = (FDeferredLightData)0;
+		LightData.Color = DirectionalLightData.DirectionalLightColor;
+		LightData.FalloffExponent = 0;
+		LightData.Direction = DirectionalLightData.DirectionalLightDirection;
+		LightData.DistanceFadeMAD = DirectionalLightData.DirectionalLightDistanceFadeMAD;
+		LightData.bRadialLight = false;
+		LightData.SpecularScale = SpecularScale;
 
-		float3 LightColor = DirectionalLightData.DirectionalLightColor;
-	
-		#if NON_DIRECTIONAL_DIRECT_LIGHTING
-			NoL = 1.0f;
-		#endif
+		LightData.ShadowedBits = (DirectionalLightData.DirectionalLightShadowMapChannelMask & 0xFF) != 0 ? 1 : 0;
+		// Static shadowing uses ShadowMapChannel, dynamic shadows are packed into light attenuation using PreviewShadowMapChannel
+		//ShadowMapChannelMask记录了该光源在ShadowMap使用的通道
+        LightData.ShadowMapChannelMask = UnpackShadowMapChannelMask(DirectionalLightData.DirectionalLightShadowMapChannelMask);
 
-		float ShadowFactor = ComputeDirectionalLightStaticShadowing(WorldPosition);
-		ShadowFactor *= ComputeDirectionalLightDynamicShadowing(WorldPosition, SceneDepth);
+        
+			float4 PreviewShadowMapChannelMask = UnpackShadowMapChannelMask(DirectionalLightData.DirectionalLightShadowMapChannelMask >> 4);		//从多通道shadowmap中提取该光源对应的一个通道
+			float DynamicShadowing = dot(PreviewShadowMapChannelMask, DynamicShadowFactors);
 
-		// No specular for vertex lighting
-		float3 DiffuseLighting = Diffuse_Lambert(DiffuseColor);
-		DirectLighting += LightColor * (NoL * ShadowFactor) * DiffuseLighting;
+			// In the forward shading path we can't separate per-object shadows from CSM, since we only spend one light attenuation channel per light
+			// If CSM is enabled (distance fading to precomputed shadowing is active), treat all of our dynamic shadowing as whole scene shadows that will be faded out at the max CSM distance
+			// If CSM is not enabled, allow our dynamic shadowing to coexist with precomputed shadowing
+        	//TODO 不理解LightData.DistanceFadeMAD.y
+			float PerObjectShadowing = LightData.DistanceFadeMAD.y < 0.0f ? 1.0f : DynamicShadowing;
+			float WholeSceneShadowing = LightData.DistanceFadeMAD.y < 0.0f ? DynamicShadowing : 1.0f;
+		
+			float4 LightAttenuation = float4(WholeSceneShadowing.xx, PerObjectShadowing.xx);
+
+		FDeferredLightingSplit NewLighting = GetDynamicLightingSplit(WorldPosition, -CameraVector, GBufferData, 1, GBufferData.ShadingModelID, LightData, LightAttenuation, Dither, uint2(0,0), RectTexture, OutDirectionalLightShadow);
+
+		FLATTEN
+		if ((DirectionalLightData.DirectionalLightShadowMapChannelMask >> 8) & LightingChannelMask)
+		{
+			DirectLighting.DiffuseLighting += NewLighting.DiffuseLighting;
+			DirectLighting.SpecularLighting += NewLighting.SpecularLighting;
+		}
 	}
-	
-	const FCulledLightsGridData CulledLightsGrid = GetCulledLightsGrid(GridIndex, EyeIndex);
-
-	// Limit max to ForwardLightData.NumLocalLights.
-	// This prevents GPU hangs when the PS tries to read from uninitialized NumCulledLightsGrid buffer
-	const uint NumLocalLights = min(CulledLightsGrid.NumLocalLights, GetNumLocalLights(EyeIndex));
-
-	LOOP
-	for (uint LocalLightListIndex = 0; LocalLightListIndex < NumLocalLights; LocalLightListIndex++)
-	{
-		const FLocalLightData LocalLight = GetLocalLightData(CulledLightsGrid.DataStartIndex + LocalLightListIndex, EyeIndex);
-		 
-		FSimpleDeferredLightData LightData = (FSimpleDeferredLightData)0;
-		LightData.Position = LocalLight.LightPositionAndInvRadius.xyz;
-		LightData.InvRadius = LocalLight.LightPositionAndInvRadius.w;
-		LightData.Color = LocalLight.LightColorAndFalloffExponent.xyz;
-		LightData.FalloffExponent = LocalLight.LightColorAndFalloffExponent.w;
-		LightData.bInverseSquared = LightData.FalloffExponent == 0;
-						
-		// No specular for vertex lighting
-		float3 CameraVector = 0;
-		float3 SpecularColor = 0;
-		float Roughness = 1.0f;
-		DirectLighting += GetSimpleDynamicLighting(WorldPosition, CameraVector, WorldNormal, 1, DiffuseColor, SpecularColor, Roughness, LightData);
-	}
-
-	return DirectLighting;
-}
-
 ```
 
-
+这部分代码主要是处理阴影和其他光源，真正计算光照的代码是GetDynamicLightingSplit。这个函数可用于前向渲染、延迟渲染，也可用于各种光源类型。这部分内容放在延迟渲染部分。接下来使用LOOP计算其他类型光源。
 
 ### 前向渲染（IBL）
 
