@@ -76,7 +76,7 @@ FMaterialPixelParameters包含了像素着色器所需的其他数据
 
 ![image-20210811150420576](UE4 Shader概述.assets/image-20210811150420576.png)
 
-#### 写入GBuffer  BasePassPixelShader.usf
+#### 写入GBuffer结构体，最后写入MRT才是真正的GBuffer  BasePassPixelShader.usf
 
 ![image-20210811152416130](UE4 Shader概述.assets/image-20210811152416130.png)
 
@@ -446,11 +446,11 @@ float3 AOMultiBounce( float3 BaseColor, float AO )
 float3 DiffuseIndirectLighting;
 float3 SubsurfaceIndirectLighting;	//Defaultlit也需要计算SubsurfaceIndirectLighting，但是SubsurfaceColor=0，不起作用。
 
-//SH计算天光、体积光、点光的间接光照。采样LightMap。还有一部分与半透明前向着色，顶点雾化和调试相关的代码
+//SH计算天光、体积光、点光的间接光照。采样LightMap。还有一部分与半透明前向着色，顶点雾化相关的代码
 //DiffuseDir就是环境法线
 GetPrecomputedIndirectLightingAndSkyLight(MaterialParameters, Interpolants, BasePassInterpolants, LightmapVTPageTableResult, GBuffer, DiffuseDir, VolumetricLightmapBrickTextureUVs, DiffuseIndirectLighting, SubsurfaceIndirectLighting, IndirectIrradiance);
 
-// 非直接光照应用AO.
+// 屏幕空间间接光照遮蔽，数据来自IndirectOcclusionTexture
 float IndirectOcclusion = 1.0f;
 float2 NearestResolvedDepthScreenUV = 0;
 float DirectionalLightShadow = 1.0f;
@@ -506,7 +506,7 @@ UE4会把场景中的灯光按照屏幕空间分成相应的grid，类似于clus
 FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 WorldPosition, float3 CameraVector, FGBufferData GBufferData, float2 ScreenUV, uint PrimitiveId, uint EyeIndex, float Dither, inout float OutDirectionalLightShadow)
 {
 	float4 DynamicShadowFactors = 1;
-    //Float4类型，保存了多张shadowmap，Located in ForwardLightingCommon.ush
+    //Float4类型，保存了多张shadow，Located in ForwardLightingCommon.ush
 	DynamicShadowFactors = GetForwardDynamicShadowFactors(ScreenUV);
 
 	FDeferredLightingSplit DirectLighting;
@@ -533,8 +533,8 @@ FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 Worl
 		LightData.ShadowedBits = (DirectionalLightData.DirectionalLightShadowMapChannelMask & 0xFF) != 0 ? 1 : 0;
 		// Static shadowing uses ShadowMapChannel, dynamic shadows are packed into light attenuation using PreviewShadowMapChannel
 		//ShadowMapChannelMask记录了该光源在ShadowMap使用的通道
+        //DirectionalLightShadowMapChannelMask的前四位用于static shadow，后四位用于dynamic shadow
         LightData.ShadowMapChannelMask = UnpackShadowMapChannelMask(DirectionalLightData.DirectionalLightShadowMapChannelMask);
-
         
 			float4 PreviewShadowMapChannelMask = UnpackShadowMapChannelMask(DirectionalLightData.DirectionalLightShadowMapChannelMask >> 4);		//从多通道shadowmap中提取该光源对应的一个通道
 			float DynamicShadowing = dot(PreviewShadowMapChannelMask, DynamicShadowFactors);
@@ -542,10 +542,14 @@ FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 Worl
 			// In the forward shading path we can't separate per-object shadows from CSM, since we only spend one light attenuation channel per light
 			// If CSM is enabled (distance fading to precomputed shadowing is active), treat all of our dynamic shadowing as whole scene shadows that will be faded out at the max CSM distance
 			// If CSM is not enabled, allow our dynamic shadowing to coexist with precomputed shadowing
-        	//TODO 不理解LightData.DistanceFadeMAD.y
 			float PerObjectShadowing = LightData.DistanceFadeMAD.y < 0.0f ? 1.0f : DynamicShadowing;
 			float WholeSceneShadowing = LightData.DistanceFadeMAD.y < 0.0f ? DynamicShadowing : 1.0f;
-		
+			//四个通道存储LightAttenuation。开启CSM使用摄影机距离插值方法，关闭CSM使用相乘方法
+        	//实现函数GetShadowTerms, Located in DeferredLightingCommon.ush
+        	//x:与静态阴影插值的动态阴影
+        	//y:sss与静态阴影插值的动态阴影
+        	//z:与静态阴影相乘的动态阴影
+        	//w:sss与静态阴影相乘的动态阴影
 			float4 LightAttenuation = float4(WholeSceneShadowing.xx, PerObjectShadowing.xx);
 
 		FDeferredLightingSplit NewLighting = GetDynamicLightingSplit(WorldPosition, -CameraVector, GBufferData, 1, GBufferData.ShadingModelID, LightData, LightAttenuation, Dither, uint2(0,0), RectTexture, OutDirectionalLightShadow);
@@ -559,7 +563,7 @@ FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 Worl
 	}
 ```
 
-这部分代码主要是处理阴影和其他光源，真正计算光照的代码是GetDynamicLightingSplit。这个函数可用于前向渲染、延迟渲染，也可用于各种光源类型。这部分内容放在延迟渲染部分。接下来使用LOOP计算其他类型光源。
+这部分代码主要是处理阴影，接下来使用LOOP计算其他类型光源。真正计算光照的代码是GetDynamicLightingSplit。这个函数可用于前向渲染、延迟渲染，也可用于各种光源类型。这部分内容放在延迟渲染部分。
 
 ### 前向渲染（IBL）
 
@@ -581,6 +585,70 @@ FDeferredLightingSplit GetForwardDirectLightingSplit(uint GridIndex, float3 Worl
 				}
 			#endif
 ```
+
+IBL属于间接光照，所以对乘了IndirectOcclusion和AOMultiBounce，上文提到前者是对间接光照的遮蔽，后者是减弱遮蔽效果，模拟多次反弹。
+
+```glsl
+//Located in ReflectionEnvironmentComposite.ush，仅摘取重要代码
+float3 CompositeReflectionCapturesAndSkylight(
+	float CompositeAlpha, 
+	float3 WorldPosition, 
+	float3 RayDirection, 
+	float Roughness, 
+	float IndirectIrradiance, 
+	float IndirectSpecularOcclusion,
+	float3 ExtraIndirectSpecular,
+	uint NumCapturesAffectingTile,
+	uint CaptureDataStartIndex, 
+	int SingleCaptureIndex,
+	bool bCompositeSkylight,
+	uint EyeIndex)
+{
+	float Mip = ComputeReflectionCaptureMipFromRoughness(Roughness, View.ReflectionCubemapMaxMip);
+	float4 ImageBasedReflections = float4(0, 0, 0, CompositeAlpha);
+	float2 CompositedAverageBrightness = float2(0.0f, 1.0f);
+	float4 Sample = ReflectionStruct.ReflectionCubemap.SampleLevel(ReflectionStruct.ReflectionCubemapSampler, float4(ProjectedCaptureVector, CaptureArrayIndex), Mip);
+
+	Sample.rgb *= CaptureProperties.r;
+	Sample *= DistanceAlpha;
+	ImageBasedReflections = float4(Sample.rgb, 1 - Sample.a);
+
+	// Apply indirect lighting scale while we have only accumulated reflection captures
+	ImageBasedReflections.rgb *= View.IndirectLightingColorScale;
+	CompositedAverageBrightness.x *= Luminance( View.IndirectLightingColorScale );
+
+#if ENABLE_SKY_LIGHT
+	float3 SkyLighting = GetSkyLightReflection(RayDirection, Roughness, SkyAverageBrightness);
+
+		// Normalize for static skylight types which mix with lightmaps
+		bool bNormalize = ReflectionStruct.SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
+
+		FLATTEN
+		if (bNormalize)
+		{
+			ImageBasedReflections.rgb += ImageBasedReflections.a * SkyLighting * IndirectSpecularOcclusion;
+			CompositedAverageBrightness.x += SkyAverageBrightness * CompositedAverageBrightness.y;
+		}
+		else
+		{
+			ExtraIndirectSpecular += SkyLighting * IndirectSpecularOcclusion;
+		}
+	}
+#endif
+
+#if ALLOW_STATIC_LIGHTING
+	ImageBasedReflections.rgb *= ComputeMixingWeight(IndirectIrradiance, CompositedAverageBrightness.x, Roughness);
+#endif
+
+	ImageBasedReflections.rgb += ImageBasedReflections.a * ExtraIndirectSpecular;
+
+	return ImageBasedReflections.rgb;
+}
+```
+
+IBL的主要代码，包含反射探头和天光两部分。对球面和立方体探头分别计算反射方向，使用LOOP处理多个反射探头，用平均亮度进行混合。
+
+天光部分由GetSkyLightReflection获得，还会与lightmap混合。
 
 ### 前向渲染（FullyRough）
 
