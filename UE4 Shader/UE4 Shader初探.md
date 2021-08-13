@@ -276,7 +276,7 @@ SetGBufferForShadingModel(
 
 FGBufferData 定义在 DeferredShadingCommon.ush ，注释说明了各个变量的取值和用途。
 
-GBuffer的确切内容可能有所不同，根据您的项目设置，可以改变通道数量及其用途。一个常见的案例是5纹理GBuffer，A到E. `GBufferA.rgb = World Normal`，`PerObjectGBufferData`填充alpha通道。`GBufferB.rgba = Metallic, Specular, Roughness, ShadingModelID`。`GBufferC.rgb`是`BaseColor`与`GBufferAO`填充alpha通道。`GBufferD`专用于自定义数据，`GBufferE`适用于预先计算的阴影因子。解析GBuffer的代码： DefferredShadingCommon.ush的函数DecodeGBufferData。
+GBuffer的确切内容可能有所不同，根据您的项目设置，可以改变通道数量及其用途。颜色输出部分介绍GBuffer结构。
 
 * 交错梯度噪声
 
@@ -617,38 +617,14 @@ float3 CompositeReflectionCapturesAndSkylight(
 	ImageBasedReflections.rgb *= View.IndirectLightingColorScale;
 	CompositedAverageBrightness.x *= Luminance( View.IndirectLightingColorScale );
 
-#if ENABLE_SKY_LIGHT
-	float3 SkyLighting = GetSkyLightReflection(RayDirection, Roughness, SkyAverageBrightness);
-
-		// Normalize for static skylight types which mix with lightmaps
-		bool bNormalize = ReflectionStruct.SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
-
-		FLATTEN
-		if (bNormalize)
-		{
-			ImageBasedReflections.rgb += ImageBasedReflections.a * SkyLighting * IndirectSpecularOcclusion;
-			CompositedAverageBrightness.x += SkyAverageBrightness * CompositedAverageBrightness.y;
-		}
-		else
-		{
-			ExtraIndirectSpecular += SkyLighting * IndirectSpecularOcclusion;
-		}
-	}
-#endif
-
-#if ALLOW_STATIC_LIGHTING
-	ImageBasedReflections.rgb *= ComputeMixingWeight(IndirectIrradiance, CompositedAverageBrightness.x, Roughness);
-#endif
-
-	ImageBasedReflections.rgb += ImageBasedReflections.a * ExtraIndirectSpecular;
 
 	return ImageBasedReflections.rgb;
 }
 ```
 
-IBL的主要代码，包含反射探头和天光两部分。对球面和立方体探头分别计算反射方向，使用LOOP处理多个反射探头，用平均亮度进行混合。
+IBL包含反射探头和天光两部分。对球面和立方体探头分别计算反射方向，使用LOOP处理多个反射探头，用平均亮度进行混合。
 
-天光部分由GetSkyLightReflection获得，还会与lightmap混合。
+天光部分由GetSkyLightReflection（ReflectionEnvironmentShaders.usf）获得，还会与lightmap混合。
 
 ### 前向渲染（FullyRough）
 
@@ -676,3 +652,48 @@ IBL的主要代码，包含反射探头和天光两部分。对球面和立方�
 		#endif
 ```
 
+由于之前已将 Specular Color 合并到 Diffuse Color，FullyRough 只计算 Lambert ，但还是和其他着色模型一样调用 IntegrateBxDF
+
+### 雾效
+
+#### 高度雾 
+
+顶点高度雾直接使用插值结果。像素高度雾使用CalculateHeightFog（HeightFogCommon.ush）
+
+#### 体积雾
+
+CombineVolumetricFog（HeightFogCommon.ush）
+
+#### 雾的大气效果
+
+GetAerialPerspectiveLuminanceTransmittanceWithFogOver（SkyAtmosphereCommon.ush）
+
+#### 云体雾
+
+GetCloudLuminanceTransmittanceOverFog（VolumetricCloudCommon.ush）
+
+#### 体积光
+
+GetTranslucencyVolumeLighting（BasePassPixelShader.usf）
+
+### 自发光
+
+```glsl
+half3 Emissive = GetMaterialEmissive(PixelMaterialInputs);
+```
+
+### 颜色输出
+
+```glsl
+//颜色输出
+#if MATERIAL_OUTPUT_OPACITY_AS_ALPHA
+	Out.MRT[0] = half4(Color, Opacity);
+#else
+	Out.MRT[0] = half4(Color, 0);
+#endif
+
+//编码到GBuffer
+ EncodeGBuffer(GBuffer, Out.MRT[1], Out.MRT[2], Out.MRT[3], OutGBufferD, OutGBufferE, OutVelocity, QuantizationBias);
+```
+
+GBuffer可能用不同的结构。一个常见的案例是5纹理GBuffer，A到E. `GBufferA.rgb = World Normal`，`PerObjectGBufferData`填充alpha通道。`GBufferB.rgba = Metallic, Specular, Roughness, ShadingModelID`。`GBufferC.rgb`是`BaseColor`与`GBufferAO`填充alpha通道。`GBufferD`专用于自定义数据，`GBufferE`适用于预先计算的阴影因子。编码GBuffer函数： EncodeGBuffer，解码函数：DecodeGBufferData（DefferredShadingCommon.ush）
