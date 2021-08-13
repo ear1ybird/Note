@@ -27,14 +27,14 @@
 
 FVertexFactoryInput这个数据结构是来自C++端的数据输入
 
-![image-20210811133829837](UE4 Shader概述.assets/image-20210811133829837.png)
+![image-20210811133829837](UE4 Shader初探.assets/image-20210811133829837.png)
 
 #### 输出数据 BasePassVertexCommon.ush
 FBasePassVSOutput 有两种定义。开启曲面细分会使用 FBasePassVSToDS ，进入DS着色器。否则使用FBasePassVSToPS， 进入PS着色器。
 
 FBasePassVSToPS 有两个嵌套的结构
 
-![image-20210811140726075](UE4 Shader概述.assets/image-20210811140726075.png)
+![image-20210811140726075](UE4 Shader初探.assets/image-20210811140726075.png)
 
 FVertexFactoryInterpolantsVSToPS 定义在各个顶点工厂的 .ush 文件中。UE4中有很多VertexFactory用来处理不同网格类型，每种VertexFactory都有自己的输出结构的函数，供顶点着色器调用。例如，在LocalVertexFactoryCommon.ush可以找到输出结构的定义。
 
@@ -58,33 +58,33 @@ BasePassVertexCommon.ush： FBasePassInterpolantsVSToPS
 
 材质编辑器会用拼装好的shader代码替换 %s
 
-![image-20210811143901868](UE4 Shader概述.assets/image-20210811143901868.png)
+![image-20210811143901868](UE4 Shader初探.assets/image-20210811143901868.png)
 
 在 BasePassPixelShader.usf 中读取这些属性
 
-![image-20210811144543496](UE4 Shader概述.assets/image-20210811144543496.png)
+![image-20210811144543496](UE4 Shader初探.assets/image-20210811144543496.png)
 
 #### 材质参数输入   MaterialTemplate.ush
 
 FMaterialPixelParameters包含了像素着色器所需的其他数据
 
-![image-20210811144741956](UE4 Shader概述.assets/image-20210811144741956.png)
+![image-20210811144741956](UE4 Shader初探.assets/image-20210811144741956.png)
 
 #### 输出结构 Common.ush
 
 在前向渲染中，BasePassPixelShader.usf会将最终计算的颜色输出到 FPixelShaderOut.MRT[0]
 
-![image-20210811150420576](UE4 Shader概述.assets/image-20210811150420576.png)
+![image-20210811150420576](UE4 Shader初探.assets/image-20210811150420576.png)
 
 #### 写入GBuffer结构体，最后写入MRT才是真正的GBuffer  BasePassPixelShader.usf
 
-![image-20210811152416130](UE4 Shader概述.assets/image-20210811152416130.png)
+![image-20210811152416130](UE4 Shader初探.assets/image-20210811152416130.png)
 
 #### 延迟光照输出 DeferredLightPixelShaders.usf
 
 延迟光照输出到SV_Target0，完成渲染。
 
-![image-20210811153056089](UE4 Shader概述.assets/image-20210811153056089.png)
+![image-20210811153056089](UE4 Shader初探.assets/image-20210811153056089.png)
 
 ## BasePassVertexShader
 
@@ -162,7 +162,7 @@ LightmapVTPageTableResult = LightmapGetVTSampleInfo(LightmapUV0, LightmapDataInd
 
 支持虚拟纹理光照贴图可提高光照贴图烘焙的流送性能和质量。虚拟纹理可以分区域加载不同mipmap等级。虚拟纹理的最大mipmap等级由分区最小分辨率决定。由于虚拟纹理采用了随机三线性过滤，高频纹理会出现雪花噪点。
 在 项目设置（Project Settings） 中的 引擎（Engine） > 渲染（Rendering） 下，设置 启用虚拟纹理光照贴图（Enable virtual texture lightmaps），以启用对光照贴图的虚拟纹理支持。
-![image-20210811185622391](UE4 Shader概述.assets/image-20210811185622391.png)
+![image-20210811185622391](UE4 Shader初探.assets/image-20210811185622391.png)
 
 ### 采样光照图AO
 
@@ -604,6 +604,7 @@ float3 CompositeReflectionCapturesAndSkylight(
 	bool bCompositeSkylight,
 	uint EyeIndex)
 {
+    //粗糙度作为mip等级
 	float Mip = ComputeReflectionCaptureMipFromRoughness(Roughness, View.ReflectionCubemapMaxMip);
 	float4 ImageBasedReflections = float4(0, 0, 0, CompositeAlpha);
 	float2 CompositedAverageBrightness = float2(0.0f, 1.0f);
@@ -801,7 +802,7 @@ FDeferredLightData LightData = SetupLightDataForStandardDeferred();
 		OutColor += (Radiance * Attenuation);
 ```
 
-#### 动态光照
+#### 动态光照准备
 
 ```glsl
 FDeferredLightingSplit GetDynamicLightingSplit(
@@ -898,4 +899,124 @@ FDeferredLightingSplit GetDynamicLightingSplit(
 
 ```
 
-延迟渲染将四种灯光分为两种积分区域：矩形光（平行光、面光），胶囊光（点光、聚光灯）
+延迟渲染将四种灯光分为两种积分区域：矩形光（平行光、面光），胶囊光（点光、聚光灯）。根据灯光类型和REFERENCE_QUALITY一共有四个入口函数IntegrateBxDF。REFERENCE_QUALITY应该是最高质量，默认被定义为0。
+
+这一步 四种IntegrateBxDF 仅构建积分区域 FAreaLight，之后进入同名函数 IntegrateBxDF (ShadingModels.ush)计算光照。
+
+IntegrateBxDF 中包含各种光照模型 BRDF 的入口函数，下面以 DefaultLitBxDF (ShadingModels.ush)为例。
+
+#### DefaultLitBxDF (ShadingModel.ush)
+
+```glsl
+FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+{
+	BxDFContext Context;
+
+#if SUPPORTS_ANISOTROPIC_MATERIALS
+	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
+#else
+	bool bHasAnisotropy = false;
+#endif
+	
+    //初始化各种点积，各向异性需要额外的切线、副切线
+	BRANCH
+	if (bHasAnisotropy)
+	{
+		half3 X = GBuffer.WorldTangent;
+		half3 Y = normalize(cross(N, X));
+		Init(Context, N, X, Y, V, L);
+	}
+	else
+	{
+		Init(Context, N, V, L);
+        //调整模拟区域光后的各种向量之间的点积
+        //论文地址：extension://oikmahiipjniocckomdccmplodldodja/pdf-viewer/web/viewer.html?file=https%3A%2F%2Fd3ihk4j6ie4n1g.cloudfront.net%2Fdownloads%2Fassets%2FDecimaSiggraph2017.pdf%3Fmtime%3D20200402092944%26focal%3Dnone
+		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
+	}
+
+	Context.NoV = saturate(abs( Context.NoV ) + 1e-5);
+	
+	FDirectLighting Lighting;
+    //兰伯特漫反射
+	Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor );
+
+	BRANCH
+	if (bHasAnisotropy)
+	{
+		//Lighting.Specular = GBuffer.WorldTangent * .5f + .5f;
+		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
+	}
+	else
+	{
+		if( AreaLight.bIsRect )
+		{
+            //多边形光源反射 论文地址 https://eheitzresearch.wordpress.com/415-2/
+			Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
+		}
+		else
+		{
+			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
+		}
+	}
+
+	Lighting.Transmission = 0;
+	return Lighting;
+}
+
+```
+
+#### SpecularGGX (ShadingModel.ush)
+
+```glsl
+float3 SpecularGGX( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
+{
+    //Roughness贴图的数据平方得到真正的粗糙度a，再平方得到a^2
+	float a2 = Pow4( Roughness );
+    
+    //归一化系数，使半球面积分为1
+	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
+	
+	// Generalized microfacet specular
+	float D = D_GGX( a2, Context.NoH ) * Energy;
+	float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
+	float3 F = F_Schlick( SpecularColor, Context.VoH );
+
+	return (D * Vis) * F;
+}
+```
+
+#### Lambert & FDG (BRDF.ush)
+
+```glsl
+float3 Diffuse_Lambert( float3 DiffuseColor )
+{
+	return DiffuseColor * (1 / PI);
+}
+
+// [Schlick 1994, "An Inexpensive BRDF Model for Physically-Based Rendering"]
+float3 F_Schlick( float3 SpecularColor, float VoH )
+{
+	float Fc = Pow5( 1 - VoH );					// 1 sub, 3 mul
+	//return Fc + (1 - Fc) * SpecularColor;		// 1 add, 3 mad
+	// Anything less than 2% is physically impossible and is instead considered to be shadowing
+	return saturate( 50.0 * SpecularColor.g ) * Fc + (1 - Fc) * SpecularColor;
+}
+
+// [Walter et al. 2007, "Microfacet models for refraction through rough surfaces"]
+float D_GGX( float a2, float NoH )
+{
+	float d = ( NoH * a2 - NoH ) * NoH + 1;	// 2 mad
+	return a2 / ( PI*d*d );					// 4 mul, 1 rcp
+}
+
+// [Heitz 2014, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs"]
+float Vis_SmithJointApprox( float a2, float NoV, float NoL )
+{
+	float a = sqrt(a2);
+    //入射方向遮蔽、初涉方向遮蔽
+	float Vis_SmithV = NoL * ( NoV * ( 1 - a ) + a );
+	float Vis_SmithL = NoV * ( NoL * ( 1 - a ) + a );
+	return 0.5 * rcp( Vis_SmithV + Vis_SmithL );
+}
+```
+
