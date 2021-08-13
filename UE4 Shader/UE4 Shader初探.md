@@ -178,7 +178,7 @@ MaterialParameters.AOMaterialMask = GetAOMaterialMask(LightmapVTPageTableResult,
 TranslatedWorldPosition是camera空间坐标 -CameraVector
 
 ```glsl
-float4 ScreenPosition = SvPositionToResolvedScreenPosition(In.SvPosition);
+float4 ScreenPosition = SvPositionToResolvedScreenPosition(In.SvPosition);	//ScreenPosition是NDC空间的齐次坐标
 float3 TranslatedWorldPosition = SvPositionToResolvedTranslatedWorld(In.SvPosition);
 CalcMaterialParametersEx(MaterialParameters, PixelMaterialInputs, In.SvPosition, ScreenPosition, In.bIsFrontFace, TranslatedWorldPosition, TranslatedWorldPosition);
 ```
@@ -694,6 +694,208 @@ half3 Emissive = GetMaterialEmissive(PixelMaterialInputs);
 
 //编码到GBuffer
  EncodeGBuffer(GBuffer, Out.MRT[1], Out.MRT[2], Out.MRT[3], OutGBufferD, OutGBufferE, OutVelocity, QuantizationBias);
+
+//之后还会将速度写入MRT
 ```
 
 GBuffer可能用不同的结构。一个常见的案例是5纹理GBuffer，A到E. `GBufferA.rgb = World Normal`，`PerObjectGBufferData`填充alpha通道。`GBufferB.rgba = Metallic, Specular, Roughness, ShadingModelID`。`GBufferC.rgb`是`BaseColor`与`GBufferAO`填充alpha通道。`GBufferD`专用于自定义数据，`GBufferE`适用于预先计算的阴影因子。编码GBuffer函数： EncodeGBuffer，解码函数：DecodeGBufferData（DefferredShadingCommon.ush）
+
+## DeferredLightVertexShaders
+
+延迟渲染的顶点着色阶段会为各种光源生成几何体
+
+### 平行光（绘制长方形）
+
+```glsl
+void DirectionalVertexMain(
+	in float2 InPosition : ATTRIBUTE0,
+	in float2 InUV       : ATTRIBUTE1,
+	out float2 OutTexCoord : TEXCOORD0,
+	out float3 OutScreenVector : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{	
+	DrawRectangle(float4(InPosition.xy, 0, 1), InUV, OutPosition, OutTexCoord);
+	OutScreenVector = mul(float4(OutPosition.xy, 1, 0), View.ScreenToTranslatedWorld).xyz;
+}
+```
+
+### 点光源、聚光灯（近似几何体）
+
+输入一个顶点ID，在顶点着色器中计算该顶点的世界坐标。整个顶点着色阶段会生成光源形状的模型，像素阶段使用这个模型渲染灯光。
+
+![img](https://img2020.cnblogs.com/blog/1617944/202105/1617944-20210527125757261-177285983.jpg)
+
+## DeferredLightPixelShaders.usf
+
+### 获取屏幕数据
+
+```glsl
+FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(InputParams.ScreenUV);
+
+//Located in DeferredShadingCommon.ush
+FScreenSpaceData GetScreenSpaceData(float2 UV, bool bGetNormalizedNormal = true)
+{
+	FScreenSpaceData Out;
+    //获取GBuffer
+	Out.GBuffer = GetGBufferData(UV, bGetNormalizedNormal);
+    //获取屏幕空间AO
+	float4 ScreenSpaceAO = Texture2DSampleLevel(SceneTexturesStruct.ScreenSpaceAOTexture, SceneTexturesStruct_ScreenSpaceAOTextureSampler, UV, 0);
+	Out.AmbientOcclusion = ScreenSpaceAO.r;
+	return Out;
+}
+
+//Located in DeferredShadingCommon.ush
+FGBufferData GetGBufferData(float2 UV, bool bGetNormalizedNormal = true)
+{
+	float4 GBufferA = Texture2DSampleLevel(SceneTexturesStruct.GBufferATexture, SceneTexturesStruct_GBufferATextureSampler, UV, 0);
+	float4 GBufferB = Texture2DSampleLevel(SceneTexturesStruct.GBufferBTexture, SceneTexturesStruct_GBufferBTextureSampler, UV, 0);
+	float4 GBufferC = Texture2DSampleLevel(SceneTexturesStruct.GBufferCTexture, SceneTexturesStruct_GBufferCTextureSampler, UV, 0);
+	float4 GBufferD = Texture2DSampleLevel(SceneTexturesStruct.GBufferDTexture, SceneTexturesStruct_GBufferDTextureSampler, UV, 0);
+	//采样CustomDepth
+    float CustomNativeDepth = Texture2DSampleLevel(SceneTexturesStruct.CustomDepthTexture, SceneTexturesStruct_CustomDepthTextureSampler, UV, 0).r;
+	
+    //采样CustomStencil
+	int2 IntUV = (int2)trunc(UV * View.BufferSizeAndInvSize.xy);
+	uint CustomStencil = SceneTexturesStruct.CustomStencilTexture.Load(int3(IntUV, 0)) STENCIL_COMPONENT_SWIZZLE;
+
+	#if ALLOW_STATIC_LIGHTING	//静态光
+		float4 GBufferE = Texture2DSampleLevel(SceneTexturesStruct.GBufferETexture, SceneTexturesStruct_GBufferETextureSampler, UV, 0);
+	#else
+		float4 GBufferE = 1;
+	#endif
+	
+    //获取切线
+	float4 GBufferF = Texture2DSampleLevel(SceneTexturesStruct.GBufferFTexture, SceneTexturesStruct_GBufferFTextureSampler, UV, 0);
+
+	#if WRITES_VELOCITY_TO_GBUFFER
+		float4 GBufferVelocity = Texture2DSampleLevel(SceneTexturesStruct.GBufferVelocityTexture, SceneTexturesStruct_GBufferVelocityTextureSampler, UV, 0);
+	#else
+		float4 GBufferVelocity = 0;
+	#endif
+
+    //采样SceneDepthTexture
+	float SceneDepth = CalcSceneDepth(UV);
+	
+    //以上数据组成结构体 Located in DeferredShadingCommon.ush
+	return DecodeGBufferData(GBufferA, GBufferB, GBufferC, GBufferD, GBufferE, GBufferF, GBufferVelocity, CustomNativeDepth, CustomStencil, SceneDepth, bGetNormalizedNormal, CheckerFromSceneColorUV(UV));
+}
+```
+
+解码GBuffer的过程是从GBuffer纹理中采样数据，二次加工并存储到FGBufferData中，然后FGBufferData的实例又存储到FScreenSpaceData中。以便后续的光照计算中直接访问。
+
+### 计算光照
+
+#### 光照函数入口
+
+```glsl
+FDeferredLightData LightData = SetupLightDataForStandardDeferred();
+		float Dither = InterleavedGradientNoise(InputParams.PixelPos, View.StateFrameIndexMod8 );
+		FRectTexture RectTexture = InitRectTexture(DeferredLightUniforms.SourceTexture);
+		float SurfaceShadow = 1.0f;
+		//动态光照入口
+		const float4 Radiance = GetDynamicLighting(DerivedParams.WorldPosition, DerivedParams.CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, ScreenSpaceData.GBuffer.ShadingModelID, LightData, GetPerPixelLightAttenuation(InputParams.ScreenUV), Dither, uint2(InputParams.PixelPos), RectTexture, SurfaceShadow);
+		//光源衰减系数
+		const float  Attenuation = ComputeLightProfileMultiplier(DerivedParams.WorldPosition, DeferredLightUniforms.Position, -DeferredLightUniforms.Direction, DeferredLightUniforms.Tangent);
+
+		OutColor += (Radiance * Attenuation);
+```
+
+#### 动态光照
+
+```glsl
+FDeferredLightingSplit GetDynamicLightingSplit(
+	float3 WorldPosition, float3 CameraVector, FGBufferData GBuffer, float AmbientOcclusion, uint ShadingModelID, 
+	FDeferredLightData LightData, float4 LightAttenuation, float Dither, uint2 SVPos, FRectTexture SourceTexture,
+	inout float SurfaceShadow)
+{
+    //漫反射的高光分别存到FLightAccumulator，返回时分离。对次表面材质做了特殊处理
+	FLightAccumulator LightAccumulator = (FLightAccumulator)0;
+
+	float3 V = -CameraVector;
+	float3 N = GBuffer.WorldNormal;
+	
+	float3 L = LightData.Direction;	// Already normalized
+	float3 ToLight = L;
+	
+	float LightMask = 1;
+	if (LightData.bRadialLight)
+	{
+		LightMask = GetLocalLightAttenuation( WorldPosition, LightData, ToLight, L );
+	}
+    //成本估计，推测用于编辑器的shader complexit
+	LightAccumulator.EstimatedCost += 0.3f;		// running the PixelShader at all has a cost
+	
+    //跳过光照强度小于0的光源
+	BRANCH
+	if( LightMask > 0 )
+	{
+        //计算阴影
+		FShadowTerms Shadow;
+		Shadow.SurfaceShadow = AmbientOcclusion;
+		GetShadowTerms(GBuffer, LightData, WorldPosition, L, LightAttenuation, Dither, Shadow);
+		SurfaceShadow = Shadow.SurfaceShadow;
+
+		LightAccumulator.EstimatedCost += 0.3f;		// add the cost of getting the shadow terms
+		
+        //如果阴影是全黑跳过光照计算
+		BRANCH
+		if( Shadow.SurfaceShadow + Shadow.TransmissionShadow > 0 )
+		{
+			float3 LightColor = LightData.Color;
+		
+         //没有平行光时，只计算漫反射
+		#if NON_DIRECTIONAL_DIRECT_LIGHTING
+			float Lighting;
+            //矩形光
+			if( LightData.bRectLight )
+			{
+				FRect Rect = GetRect( ToLight, LightData );
+				Lighting = IntegrateLight( Rect, SourceTexture);
+			}
+			else
+			{	//胶囊灯
+				FCapsuleLight Capsule = GetCapsule( ToLight, LightData );
+				Lighting = IntegrateLight( Capsule, LightData.bInverseSquared );
+			}
+
+			float3 LightingDiffuse = Diffuse_Lambert( GBuffer.DiffuseColor ) * Lighting;
+			LightAccumulator_AddSplit(LightAccumulator, LightingDiffuse, 0.0f, 0, LightColor * LightMask * Shadow.SurfaceShadow, bNeedsSeparateSubsurfaceLightAccumulation);
+		#else
+            //有平行光时
+			FDirectLighting Lighting;
+			if (LightData.bRectLight)
+			{
+				FRect Rect = GetRect( ToLight, LightData );
+				#if REFERENCE_QUALITY
+					Lighting = IntegrateBxDF( GBuffer, N, V, Rect, Shadow, SourceTexture, SVPos );
+				#else
+					Lighting = IntegrateBxDF( GBuffer, N, V, Rect, Shadow, SourceTexture);
+				#endif
+			}
+			else
+			{
+				FCapsuleLight Capsule = GetCapsule( ToLight, LightData );
+
+				#if REFERENCE_QUALITY
+					Lighting = IntegrateBxDF( GBuffer, N, V, Capsule, Shadow, SVPos );
+				#else
+					Lighting = IntegrateBxDF( GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared );
+				#endif
+			}
+
+			Lighting.Specular *= LightData.SpecularScale;
+			LightAccumulator_AddSplit( LightAccumulator, Lighting.Diffuse, Lighting.Specular, Lighting.Diffuse, LightColor * LightMask * Shadow.SurfaceShadow, bNeedsSeparateSubsurfaceLightAccumulation );
+			LightAccumulator_AddSplit( LightAccumulator, Lighting.Transmission, 0.0f, Lighting.Transmission, LightColor * LightMask * Shadow.TransmissionShadow, bNeedsSeparateSubsurfaceLightAccumulation );
+
+			LightAccumulator.EstimatedCost += 0.4f;		// add the cost of the lighting computations (should sum up to 1 form one light)
+		#endif
+		}
+	}
+
+	return LightAccumulator_GetResultSplit(LightAccumulator);
+}
+
+```
+
+延迟渲染将四种灯光分为两种积分区域：矩形光（平行光、面光），胶囊光（点光、聚光灯）
