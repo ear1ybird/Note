@@ -25,7 +25,7 @@
 
 烘培体积中的静态物体GI，可用于体积中的动态物体，或提高体积中静态物体的GI质量
 
-![Image](C:\Users\EAR1YB~1\AppData\Local\Temp\Image.png)
+![Image](UE4场景.assets/Image.png)
 
 # 常用cmd
 
