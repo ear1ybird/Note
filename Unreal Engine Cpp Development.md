@@ -69,3 +69,9 @@ Shared base for AI and players,not visually represented in world.
 * AIController.h
 
   One per AI, holds the 'logic' that controls the Pawn
+  
+  ## Collision & Physics
+  
+  * Collision Channels
+  * Object Types
+  * Reactions: Block, Overlap, Ignore
