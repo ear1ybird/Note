@@ -75,3 +75,10 @@ Shared base for AI and players,not visually represented in world.
   * Collision Channels
   * Object Types
   * Reactions: Block, Overlap, Ignore
+  
+  ### Collision Event
+  
+  ![image-20220622193757588](assets/image-20220622193757588.png)
+
+* Generate Overlap Events：自身是否生成Overlap Events
+* Simulation Generates Hit Events：自身是否生成Hit Events。**对没开启Simulate Physics的物体无效**。
