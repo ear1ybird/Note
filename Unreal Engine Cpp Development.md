@@ -82,3 +82,32 @@ Shared base for AI and players,not visually represented in world.
 
 * Generate Overlap Events：自身是否生成Overlap Events
 * Simulation Generates Hit Events：自身是否生成Hit Events。**对没开启Simulate Physics的物体无效**。
+
+## Interface
+
+创建Unreal Interface后，会生成两个Class：
+
+```c++
+// This class does not need to be modified.
+UINTERFACE(MinimalAPI)
+class USGamePlayInterface : public UInterface
+{
+	GENERATED_BODY()
+};
+
+class UECPPACTIONROGUELIKE_API ISGamePlayInterface
+{
+	GENERATED_BODY()
+
+	// Add interface functions to this class. This is the class that will be inherited to implement this interface.
+public:
+	UFUNCTION(BlueprintNativeEvent)
+	void Interact(APawn* InstigatorActor);
+};
+```
+
+* **其中ISGamePlayInterface用于继承，USGamePlayInterface用于Implements函数判断是否继承**
+
+* UFUNCTION(BlueprintNativeEvent)：可在C++中实现、也能在蓝图中实现
+* UFUNCTION(BlueprintImplementableEvent)：只能在蓝图中实现
+
