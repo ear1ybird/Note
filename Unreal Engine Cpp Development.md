@@ -111,3 +111,9 @@ public:
 * UFUNCTION(BlueprintNativeEvent)：可在C++中实现、也能在蓝图中实现
 * UFUNCTION(BlueprintImplementableEvent)：只能在蓝图中实现
 
+### 在蓝图中调用 BlueprintNativeEvent 接口
+
+蓝图类是Cpp类的子类，所以在蓝图中实现的接口会重写Cpp接口。
+
+蓝图类可以调用Cpp类的接口：![image-20220625175730760](assets/image-20220625175730760.png)
+
