@@ -117,3 +117,37 @@ public:
 
 蓝图类可以调用Cpp类的接口：![image-20220625175730760](assets/image-20220625175730760.png)
 
+## UE_LOG
+
+### 常见用法
+
+```c++
+UE_LOG(LogTemp, Warning, TEXT("Hello"));
+
+UE_LOG(LogTemp, Warning, TEXT("The Actor's name is %s"), *YourActor->GetName());
+
+UE_LOG(LogTemp, Warning, TEXT("The boolean value is %s"), ( bYourBool ? TEXT("true") : TEXT("false") ));
+
+UE_LOG(LogTemp, Warning, TEXT("The integer value is: %d"), YourInteger);
+
+UE_LOG(LogTemp, Warning, TEXT("The float value is: %f"), YourFloat);
+
+UE_LOG(LogTemp, Warning, TEXT("The vector value is: %s"), *YourVector.ToString());
+
+UE_LOG(LogTemp, Warning, TEXT("Current values are: vector %s, float %f, and integer %d"), *YourVector.ToString(), YourFloat, YourInteger);
+```
+
+**其中字符串的重载运算符 \*，用户将FString转换为期望类型（如TChar\* 字符串数组）**
+
+### UE_LOG常用函数
+
+```c++
+//获取Name而不关心是否是空指针
+FString GetNameSafe(AACtor* Actor);
+
+//获取启动游戏后的计时器
+float GetWorld()->TimeSeconds; 
+```
+
+
+
