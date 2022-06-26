@@ -139,7 +139,7 @@ UE_LOG(LogTemp, Warning, TEXT("Current values are: vector %s, float %f, and inte
 
 **其中字符串的重载运算符 \*，用户将FString转换为期望类型（如TChar\* 字符串数组）**
 
-### UE_LOG常用函数
+### UE_LOG 常用函数
 
 ```c++
 //获取Name而不关心是否是空指针
@@ -149,5 +149,7 @@ FString GetNameSafe(AACtor* Actor);
 float GetWorld()->TimeSeconds; 
 ```
 
+### DrawDebugString()
 
+用于在世界空间打印字符串进行调试
 
