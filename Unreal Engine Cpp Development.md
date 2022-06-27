@@ -153,3 +153,22 @@ float GetWorld()->TimeSeconds;
 
 用于在世界空间打印字符串进行调试
 
+## Trace
+
+* Trace类型：LineTrace、SweepTrace
+* Trace数量：TraceSingle、TraceMulti
+* Trace方式：ByChannel、ByObjectType、ByProfile
+
+### ByChannel
+
+**这根射线的 Collision Type 是 WorldStatic**，所有与 WorldStatic 类型为Block的，都会挡住射线
+
+### ByObjectType
+
+设置其他物体的类型
+
+```c++
+FCollisionObjectQueryParams ObjectQueryParams;
+ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+```
+
