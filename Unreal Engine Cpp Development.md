@@ -70,18 +70,18 @@ Shared base for AI and players,not visually represented in world.
 
   One per AI, holds the 'logic' that controls the Pawn
   
-  ## Collision & Physics
-  
+## Collision & Physics
+
   * Collision Channels
   * Object Types
   * Reactions: Block, Overlap, Ignore
-  
+
   ### Collision Event
-  
+
   ![image-20220622193757588](assets/image-20220622193757588.png)
 
-* Generate Overlap Events：自身是否生成Overlap Events
-* Simulation Generates Hit Events：自身是否生成Hit Events。**对没开启Simulate Physics的物体无效**。
+* Generate Overlap Events：自身是否生成Overlap Events。**只在两物体同时开启此选项时才能生成Overlap Events。**
+* Simulation Generates Hit Events：自身是否生成Hit Events。**此选项只再两个物体都开启Simulation Physics时有效**。
 
 ## Interface
 
@@ -172,3 +172,6 @@ FCollisionObjectQueryParams ObjectQueryParams;
 ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 ```
 
+# 踩坑记录
+
+1. 创建组件不会默认设置为根组件的子物体。在构造函数中使用SetupAttachment，在运行时使用AttachToComponent。
