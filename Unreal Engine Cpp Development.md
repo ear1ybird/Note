@@ -32,6 +32,22 @@
 
 UPROPERTY, UFUNCTION, UCLASS, USTRUCT, UENUM 
 
+#### UPERPORTY
+
+* EditAnywhere - edit in BP editor per-instance in level
+* VisibleAnywhere - read-only in editor and level (use for components)
+* EditDefaultsOnly - hide varible per-instance, edit in BP editor only
+* VisibleDefaultsOnly - read only access for variable, only in BP editor (uncommom)
+
+
+
+* BlueprintReadOnly - read only in the Blueprint scripting (does not affect 'details' panel)
+* BlueprintReadWrite - allow only editing of instance (eg. when placed in level)
+
+
+
+* Category = " " -display only for detail panels and blueprint comtext menu
+
 ### Marking up C++
 
 * Editor & Blueprints Access
@@ -171,6 +187,26 @@ float GetWorld()->TimeSeconds;
 FCollisionObjectQueryParams ObjectQueryParams;
 ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 ```
+
+## Assert断言
+
+[断言 | 虚幻引擎文档 (unrealengine.com)](https://docs.unrealengine.com/4.27/zh-CN/ProgrammingAndScripting/ProgrammingWithCPP/Assertions/)
+
+Assert可以在开发期间帮助检测无效运行条件，但每次检查会使得效率十分低下，Assert的关键特效是不存在于发布代码中。
+
+### Check
+
+当第一个参数得出的值为false时，此族系的成员会停止执行，且**默认不会在发布版本中运行**。
+
+### Verify
+
+即便在禁用Check宏的版本中，Verify宏也会计算其表达式的值。这意味着仅当该表达式需要独立于诊断检查之外运行时，才应使用Verify宏。举例而言，若某个函数执行操作，然后返回 `bool` 来说明该操作是否成功，则应使用Verify而非Check来确保该操作成功。因为在发布版本中**Verify将忽略返回值，但仍将执行操作**。而Check在发布版本中根本不调用该函数，所以行为才会有所不同。
+
+### Ensure
+
+若Ensure宏的表达式计算得出的值为false，**引擎将通知崩溃报告器，但仍会继续运行**。为避免崩溃报告器收到太多通知，**Ensure宏在每次引擎或编辑器会话中仅报告一次**。
+
+EnsureAlways宏将会每次都触发中断。
 
 # 踩坑记录
 
