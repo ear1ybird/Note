@@ -208,6 +208,26 @@ Assert可以在开发期间帮助检测无效运行条件，但每次检查会�
 
 EnsureAlways宏将会每次都触发中断。
 
+## String Types
+
+### FString
+
+* Most Commonly used for debugging
+* Allows string manipulation (append, split, ...) 
+
+### FName
+
+* Hashed for faster 'string' comparisons (字符串比较)
+* Used by system and gameplay logic (eg. GetMuzzleLocation(FName))
+* Doesn't change once assigned
+
+### FText
+
+* Front-end text to display in UI
+* Easily 'Localized' into defferent languages
+
+
+
 # 踩坑记录
 
 1. 创建组件不会默认设置为根组件的子物体。在构造函数中使用SetupAttachment，在运行时使用AttachToComponent。
