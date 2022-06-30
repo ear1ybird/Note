@@ -226,7 +226,35 @@ EnsureAlways宏将会每次都触发中断。
 * Front-end text to display in UI
 * Easily 'Localized' into defferent languages
 
+## Event
 
+### 声明委托
+
+```c++
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnHealthChanged,AActor*,InstigatorActor,USAttributeComponent*,OwningComp,float,NewHealth,float,delta);
+```
+
+* 其中FourParam是参数数量，可以是OneParams、TwoParams、ThreeParams...
+
+* FonHealthChanges是委托类型
+
+### 触发事件
+
+```c++
+//定义委托
+UPROPERTY(BlueprintAssignable)
+FOnHealthChanged OnHealthChanged;
+
+//触发事件
+OnHealthChanged.Broadcast(nullptr,this,Health,delta);
+```
+
+* BlueprintAssignable：只能与组播委托共用。公开属性在蓝图中指定。
+* **委托只能在声明它的类中触发**
+
+### 蓝图中指定事件
+
+![image-20220630175138318](assets/image-20220630175138318.png)
 
 # 踩坑记录
 
