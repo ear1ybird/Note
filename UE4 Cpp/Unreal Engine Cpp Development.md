@@ -66,11 +66,11 @@ Shared base for AI and players,not visually represented in world.
 
   **ControlRotation可以通过SpringArmComp传递给摄影机**
 
-  ![image-20220621224143910](assets/image-20220621224143910.png)
+  ![image-20220621224143910](./Unreal Engine Cpp Development.assets/image-20220621224143910.png)
 
   **ControlRotation可以传递给Pawn**
 
-  ![image-20220621222829351](assets/image-20220621222829351.png)
+  ![image-20220621222829351](./Unreal Engine Cpp Development.assets/image-20220621222829351.png)
 
   
 
@@ -94,7 +94,7 @@ Shared base for AI and players,not visually represented in world.
 
   ### Collision Event
 
-  ![image-20220622193757588](assets/image-20220622193757588.png)
+  ![image-20220622193757588](./Unreal Engine Cpp Development.assets/image-20220622193757588.png)
 
 * Generate Overlap Events：自身是否生成Overlap Events。**只在两物体同时开启此选项时才能生成Overlap Events。**
 * Simulation Generates Hit Events：自身是否生成Hit Events。**此选项只再两个物体都开启Simulation Physics时有效**。
@@ -131,7 +131,7 @@ public:
 
 蓝图类是Cpp类的子类，所以在蓝图中实现的接口会重写Cpp接口。
 
-蓝图类可以调用Cpp类的接口：![image-20220625175730760](assets/image-20220625175730760.png)
+蓝图类可以调用Cpp类的接口：![image-20220625175730760](./Unreal Engine Cpp Development.assets/image-20220625175730760.png)
 
 ## UE_LOG
 
@@ -254,7 +254,7 @@ OnHealthChanged.Broadcast(nullptr,this,Health,delta);
 
 ### 蓝图中指定事件
 
-![image-20220630175138318](assets/image-20220630175138318.png)
+![image-20220630175138318](./Unreal Engine Cpp Development.assets/image-20220630175138318.png)
 
 # 踩坑记录
 
