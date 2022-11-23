@@ -27,14 +27,14 @@
 
 FVertexFactoryInput这个数据结构是来自C++端的数据输入
 
-![image-20210811133829837](assets/image-20210811133829837.png)
+![image-20210811133829837](./UE4 Shader初探.assets/image-20210811133829837.png)
 
 #### 输出数据 BasePassVertexCommon.ush
 FBasePassVSOutput 有两种定义。开启曲面细分会使用 FBasePassVSToDS ，进入DS着色器。否则使用FBasePassVSToPS， 进入PS着色器。
 
 FBasePassVSToPS 有两个嵌套的结构
 
-![image-20210811140726075](assets/image-20210811140726075.png)
+![image-20210811140726075](./UE4 Shader初探.assets/image-20210811140726075.png)
 
 FVertexFactoryInterpolantsVSToPS 定义在各个顶点工厂的 .ush 文件中。UE4中有很多VertexFactory用来处理不同网格类型，每种VertexFactory都有自己的输出结构的函数，供顶点着色器调用。例如，在LocalVertexFactoryCommon.ush可以找到输出结构的定义。
 
@@ -58,33 +58,33 @@ BasePassVertexCommon.ush： FBasePassInterpolantsVSToPS
 
 材质编辑器会用拼装好的shader代码替换 %s
 
-![image-20210811143901868](assets/image-20210811143901868.png)
+![image-20210811143901868](./UE4 Shader初探.assets/image-20210811143901868.png)
 
 在 BasePassPixelShader.usf 中读取这些属性
 
-![image-20210811144543496](assets/image-20210811144543496.png)
+![image-20210811144543496](./UE4 Shader初探.assets/image-20210811144543496.png)
 
 #### 材质参数输入   MaterialTemplate.ush
 
 FMaterialPixelParameters包含了像素着色器所需的其他数据
 
-![image-20210811144741956](assets/image-20210811144741956.png)
+![image-20210811144741956](./UE4 Shader初探.assets/image-20210811144741956.png)
 
 #### 输出结构 Common.ush
 
 在前向渲染中，BasePassPixelShader.usf会将最终计算的颜色输出到 FPixelShaderOut.MRT[0]
 
-![image-20210811150420576](assets/image-20210811150420576.png)
+![image-20210811150420576](./UE4 Shader初探.assets/image-20210811150420576.png)
 
 #### 写入GBuffer结构体，最后写入MRT才是真正的GBuffer  BasePassPixelShader.usf
 
-![image-20210811152416130](assets/image-20210811152416130.png)
+![image-20210811152416130](./UE4 Shader初探.assets/image-20210811152416130.png)
 
 #### 延迟光照输出 DeferredLightPixelShaders.usf
 
 延迟光照输出到SV_Target0，完成渲染。
 
-![image-20210811153056089](assets/image-20210811153056089.png)
+![image-20210811153056089](./UE4 Shader初探.assets/image-20210811153056089.png)
 
 ## BasePassVertexShader
 
@@ -162,7 +162,7 @@ LightmapVTPageTableResult = LightmapGetVTSampleInfo(LightmapUV0, LightmapDataInd
 
 支持虚拟纹理光照贴图可提高光照贴图烘焙的流送性能和质量。虚拟纹理可以分区域加载不同mipmap等级。虚拟纹理的最大mipmap等级由分区最小分辨率决定。由于虚拟纹理采用了随机三线性过滤，高频纹理会出现雪花噪点。
 在 项目设置（Project Settings） 中的 引擎（Engine） > 渲染（Rendering） 下，设置 启用虚拟纹理光照贴图（Enable virtual texture lightmaps），以启用对光照贴图的虚拟纹理支持。
-![image-20210811185622391](assets/image-20210811185622391-16522343116281.png)
+![image-20210811185622391](./UE4 Shader初探.assets/image-20210811185622391-16522343116281.png)
 
 ### 采样光照图AO
 
@@ -236,7 +236,7 @@ float3 VolumetricLightmapBrickTextureUVs;
 
 体积光照贴图是用于动态物体接收间接光照的方法。Lightmass将光照样本放置在关卡中的各个位置，并在光照构建期间为它们计算间接光照。每个这样的点都是一个体积光照贴图光照样本，它使用三阶球谐函数存储所有方向传来的光照。
 
-![CubeVLM1.png](assets/CubeVLM1.jpg)
+![CubeVLM1.png](./UE4 Shader初探.assets/CubeVLM1.jpg)
 
 ### 数据传递到GBuffer
 
@@ -295,7 +295,7 @@ float InterleavedGradientNoise( float2 uv, float FrameId )
 
 一种使用噪声解决低量化位数造成条纹的方法。下图使用的噪声依次是White noise, blue noise, Bayer, interleaved gradient noise
 
-![2dditheringallfourcompared.png](assets/2dditheringallfourcompared.png)
+![2dditheringallfourcompared.png](./UE4 Shader初探.assets/2dditheringallfourcompared.png)
 
 这个变量可能与SSAO有关，但是 SetGBufferForShadingModel （位于ShadingModelsMaterial.ush）并没有用到这个变量。
 
@@ -421,7 +421,7 @@ GBuffer.GBufferAO = AOMultiBounce( Luminance( GBuffer.SpecularColor ), SpecOcclu
 
 对原始的Normal做修改之后的新向量，它指向了当前像素一个不被其它物体（或几何体元）遮挡的平均方向，也即光线传入的主要方向。
 
-![4491947_1329650854zqXO](assets/4491947_1329650854zqXO.png)
+![4491947_1329650854zqXO](./UE4 Shader初探.assets/4491947_1329650854zqXO.png)
 
 * AOMultiBounce
 
@@ -438,7 +438,7 @@ float3 AOMultiBounce( float3 BaseColor, float AO )
 
 考虑到环境光在物体表面会发生反射，将周围的物体照亮，因此我们得到的AO系数其实是偏小的，因为光照会多次反弹，所以实际上物体表面应该会稍微更亮一点点。多次反弹后的照亮效果，和物体表面的反照率相关，反照率越高，就能将周围照的更亮。使用由光线追踪得到的AO系数作为参照，尝试用多项式拟合函数曲线，得到大致的拟合曲线
 
-![img](assets/v2-d562c89d1993fe79d8f90ba7a8d1b9a2_720w.jpg)
+![img](./UE4 Shader初探.assets/v2-d562c89d1993fe79d8f90ba7a8d1b9a2_720w.jpg)
 
 ### 光照贴图和天光
 
@@ -725,7 +725,7 @@ void DirectionalVertexMain(
 
 输入一个顶点ID，在顶点着色器中计算该顶点的世界坐标。整个顶点着色阶段会生成光源形状的模型，像素阶段使用这个模型渲染灯光。
 
-![img](assets/1617944-20210527125757261-177285983.jpg)
+![img](./UE4 Shader初探.assets/1617944-20210527125757261-177285983.jpg)
 
 ## DeferredLightPixelShaders.usf
 
